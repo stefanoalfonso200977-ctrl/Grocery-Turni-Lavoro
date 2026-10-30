@@ -2,10 +2,18 @@ export type Department = 'ALIMENTARI' | 'CHIMICA' | 'LIQUIDI' | 'PETFOOD' | 'PRO
 
 export const DEPARTMENTS: Department[] = ['ALIMENTARI', 'CHIMICA', 'LIQUIDI', 'PETFOOD', 'PROFUMERIA'];
 
+export interface WhatIfSimulation {
+  promoCoopAttiva: boolean;
+  promoCoopPercentuale: number; // e.g. 20 (+20%)
+  fattoreStagionalita: number;  // e.g. 100 = 100% (neutro), 115 = +15%
+  stagionePreset: 'NEUTRA' | 'ALTA_STAGIONE' | 'FESTIVITA' | 'ESTATE' | 'BASSA_STAGIONE' | 'PERSONALIZZATA';
+}
+
 export interface OperationalParams {
   costoOrario: number;     // e.g. 12.80 €/h
   oreTurno: number;        // e.g. 3.0 h
   reseOrarie: Record<Department, number>; // c/h
+  whatIf: WhatIfSimulation;
 }
 
 export interface DayForecastStaff {
@@ -128,6 +136,14 @@ export interface PredictionResult {
   range2WStr: string;
   dataInizioPiano: string;
   dataFinePiano: string;
+  whatIfStats?: {
+    totalRecords: number;
+    coopRecords: number;
+    coopPct: number;
+    deltaColli2w: number;
+    deltaTurni2w: number;
+    deltaCosto2w: number;
+  };
   kpi: {
     totColli2w: number;
     avgColliGiornoLav: number;
@@ -146,7 +162,10 @@ export interface HistoricalRecord {
   giornoNum: number;
   giornoNome: string;
   sottoreparto: Department;
+  descrizione?: string;
+  isCoop: boolean;
   colliOrdinati: number;
+  colliEffettiviBase: number;
   colliEffettivi: number;
   taglio: number;
   categoria?: string;

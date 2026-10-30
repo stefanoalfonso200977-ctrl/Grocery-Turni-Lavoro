@@ -39,6 +39,12 @@ const INITIAL_PARAMS: OperationalParams = {
     LIQUIDI: 35.0,
     PETFOOD: 40.0,
     PROFUMERIA: 30.0
+  },
+  whatIf: {
+    promoCoopAttiva: false,
+    promoCoopPercentuale: 20,
+    fattoreStagionalita: 100,
+    stagionePreset: 'NEUTRA'
   }
 };
 
@@ -149,6 +155,7 @@ export const App: React.FC = () => {
         fileName={fileName}
         recordsCount={records.length}
         isLoading={isLoading}
+        whatIfStats={result?.whatIfStats}
       />
 
       {/* Area Principale */}
@@ -174,7 +181,7 @@ export const App: React.FC = () => {
               <div className="flex items-center gap-2.5 shrink-0">
                 <button
                   onClick={handleDownloadExcel}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition active:scale-95"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition active:scale-95 cursor-pointer"
                   title="Scarica il file Excel completo con i 5 fogli di calcolo formattati"
                 >
                   <FileSpreadsheet className="w-4 h-4" />
@@ -182,7 +189,7 @@ export const App: React.FC = () => {
                 </button>
                 <button
                   onClick={handleExportMLJson}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg shadow-sm transition active:scale-95"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg shadow-sm transition active:scale-95 cursor-pointer"
                   title="Esporta parametri e metriche in formato JSON"
                 >
                   <Cpu className="w-4 h-4 text-purple-300" />
@@ -215,6 +222,44 @@ export const App: React.FC = () => {
                   Righe elaborate: <strong className="text-slate-900">{records.length.toLocaleString('it-IT')}</strong>
                 </span>
               </div>
+
+              {/* Banner Simulatore What-If se Attivo */}
+              {(params.whatIf.promoCoopAttiva || params.whatIf.fattoreStagionalita !== 100) && result.whatIfStats && (
+                <div className="py-2 px-3 bg-amber-50 border border-amber-300/80 rounded-lg text-xs flex flex-wrap items-center justify-between gap-2 text-amber-950 font-medium">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold flex items-center gap-1 text-amber-900">
+                      🎯 Simulazione What-If Attiva:
+                    </span>
+                    {params.whatIf.promoCoopAttiva && (
+                      <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-semibold text-[11px] border border-red-200">
+                        Promo COOP (+{params.whatIf.promoCoopPercentuale}%) su {result.whatIfStats.coopRecords.toLocaleString('it-IT')} referenze ({result.whatIfStats.coopPct}%)
+                      </span>
+                    )}
+                    {params.whatIf.fattoreStagionalita !== 100 && (
+                      <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-semibold text-[11px] border border-blue-200">
+                        Stagionalità: {params.whatIf.fattoreStagionalita}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span>
+                      Impatto Colli: <strong className={result.whatIfStats.deltaColli2w >= 0 ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
+                        {result.whatIfStats.deltaColli2w >= 0 ? `+${result.whatIfStats.deltaColli2w.toLocaleString('it-IT')}` : result.whatIfStats.deltaColli2w.toLocaleString('it-IT')} colli
+                      </strong>
+                    </span>
+                    <span>
+                      Turni: <strong className={result.whatIfStats.deltaTurni2w >= 0 ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
+                        {result.whatIfStats.deltaTurni2w >= 0 ? `+${result.whatIfStats.deltaTurni2w}` : result.whatIfStats.deltaTurni2w}
+                      </strong>
+                    </span>
+                    <span>
+                      Budget: <strong className="text-slate-900 font-bold">
+                        {result.whatIfStats.deltaCosto2w >= 0 ? `+€ ${result.whatIfStats.deltaCosto2w.toFixed(2)}` : `-€ ${Math.abs(result.whatIfStats.deltaCosto2w).toFixed(2)}`}
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

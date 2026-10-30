@@ -85,7 +85,7 @@ export const Tab4EsplosoDettaglio: React.FC<Tab4Props> = ({ result }) => {
               <button
                 key={d}
                 onClick={() => toggleDept(d)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-lg transition border ${
+                className={`px-2.5 py-1 text-xs font-medium rounded-lg transition border cursor-pointer ${
                   active
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-semibold'
                     : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
@@ -96,6 +96,13 @@ export const Tab4EsplosoDettaglio: React.FC<Tab4Props> = ({ result }) => {
             );
           })}
         </div>
+
+        {result.whatIfStats && result.whatIfStats.coopRecords > 0 && (
+          <div className="flex items-center gap-1 text-[11px] bg-red-50 text-red-800 px-2.5 py-1 rounded-lg border border-red-200 font-medium">
+            <span>🏷️ Referenze COOP (Col. J):</span>
+            <strong className="font-bold">{result.whatIfStats.coopRecords.toLocaleString('it-IT')} ({result.whatIfStats.coopPct}%)</strong>
+          </div>
+        )}
 
         <div className="ml-auto text-xs text-slate-400">
           Mostrando <strong className="text-slate-700">{filteredRows.length}</strong> righe

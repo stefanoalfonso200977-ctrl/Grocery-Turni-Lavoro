@@ -217,21 +217,28 @@ export function normalizeDept(raw: unknown): Department | null {
  * Pipeline Previsionale Bisettimanale Completa:
  * 1. Raggruppa prima per (Data, Sottoreparto) calcolando la SOMMA GIORNALIERA dei colli
  *    (proprio come `df.groupby(['Data', 'Sottoreparto'])['Colli_Effettivi_L'].sum()` nel modello Python!).
- * 2. Riconosce min e max date storiche e calcola l'inizio del piano bisettimanale.
- * 3. Addestra le stime temporali (dayAvg, lag1, lag7, roll3).
- * 4. Calcola turni, addetti soglia 0.50, jolly mobilità interna e costi lavoro.
+ * 2. Applica la simulazione What-If:
+ *    - Promo Prodotto COOP: aumenta la percentuale dei colli per le referenze aventi "COOP" in Colonna J.
+ *    - Stagionalità: moltiplicatore percentuale di flessione o picco stagionale.
+ * 3. Riconosce min e max date storiche e calcola l'inizio del piano bisettimanale.
+ * 4. Addestra le stime temporali (dayAvg, lag1, lag7, roll3).
+ * 5. Calcola turni, addetti soglia 0.50, jolly mobilità interna e costi lavoro.
  */
 export function runUnifiedForecastPipeline(
   records: HistoricalRecord[],
-  params: OperationalParams
+  params: OperationalParams,
+  isBaseline: boolean = false
 ): PredictionResult {
   if (records.length === 0) {
     throw new Error('Nessun record valido trovato per la pianificazione.');
   }
 
+  // Conteggio referenze COOP totali
+  const totalRecords = records.length;
+  const coopRecords = records.filter(r => r.isCoop).length;
+  const coopPct = totalRecords > 0 ? Math.round((coopRecords / totalRecords) * 1000) / 10 : 0;
+
   // 1. RAGGRUPPAMENTO GIORNALIERO: somma tutti i colli delle singole righe d'ordine per (Data, Sottoreparto)
-  // Questo passaggio è fondamentale: ogni riga dell'Excel è una riga d'ordine (1-10 colli),
-  // e la produzione/fabbisogno turni si basa sulla somma totale dei colli del giorno!
   const dailyMap: Record<string, {
     dataIso: string;
     dateObj: Date;
@@ -239,6 +246,10 @@ export function runUnifiedForecastPipeline(
     giornoNome: string;
     depts: Record<Department, number>;
   }> = {};
+
+  const isPromoCoop = params.whatIf?.promoCoopAttiva;
+  const promoCoopPct = params.whatIf?.promoCoopPercentuale || 0;
+  const fattoreStag = params.whatIf?.fattoreStagionalita || 100;
 
   records.forEach(r => {
     const d = parseDate(r.data);
@@ -264,8 +275,20 @@ export function runUnifiedForecastPipeline(
       };
     }
 
+    let valEffettivo = r.colliEffettiviBase !== undefined ? r.colliEffettiviBase : r.colliEffettivi;
+
+    // SIMULATORE WHAT-IF: se promo COOP attiva e riga appartiene a prodotto COOP (colonna J)
+    if (isPromoCoop && r.isCoop && promoCoopPct !== 0) {
+      valEffettivo = valEffettivo * (1 + promoCoopPct / 100);
+    }
+
+    // SIMULATORE WHAT-IF: fattore di stagionalità
+    if (fattoreStag !== 100) {
+      valEffettivo = valEffettivo * (fattoreStag / 100);
+    }
+
     if (r.sottoreparto && dailyMap[dataIso].depts[r.sottoreparto] !== undefined) {
-      dailyMap[dataIso].depts[r.sottoreparto] += r.colliEffettivi;
+      dailyMap[dataIso].depts[r.sottoreparto] += Math.round(valEffettivo);
     }
   });
 
@@ -737,6 +760,30 @@ export function runUnifiedForecastPipeline(
   const prodMediaSquadra = totOreReali2w > 0 ? Math.round((colliTot2w / totOreReali2w) * 100) / 100 : 0.0;
   const costoPerCollo = colliTot2w > 0 ? Math.round((totCostoReale2w / colliTot2w) * 10000) / 10000 : 0.0;
 
+  // Calcolo delta What-If rispetto al baseline neutro
+  let deltaColli2w = 0;
+  let deltaTurni2w = 0;
+  let deltaCosto2w = 0;
+
+  if (!isBaseline && (isPromoCoop || fattoreStag !== 100)) {
+    try {
+      const baseResult = runUnifiedForecastPipeline(records, {
+        ...params,
+        whatIf: {
+          promoCoopAttiva: false,
+          promoCoopPercentuale: 0,
+          fattoreStagionalita: 100,
+          stagionePreset: 'NEUTRA'
+        }
+      }, true);
+      deltaColli2w = colliTot2w - baseResult.kpi.totColli2w;
+      deltaTurni2w = turniTot2w - baseResult.kpi.totTurniReali2w;
+      deltaCosto2w = Math.round((totCostoReale2w - baseResult.kpi.totCostoReale2w) * 100) / 100;
+    } catch {
+      // fallback
+    }
+  }
+
   return {
     dfStaff2w,
     riepilogo14gg,
@@ -748,6 +795,14 @@ export function runUnifiedForecastPipeline(
     range2WStr,
     dataInizioPiano: formatDataStr(dataInizioPiano),
     dataFinePiano: formatDataStr(fineW2),
+    whatIfStats: {
+      totalRecords,
+      coopRecords,
+      coopPct,
+      deltaColli2w,
+      deltaTurni2w,
+      deltaCosto2w
+    },
     kpi: {
       totColli2w: colliTot2w,
       avgColliGiornoLav: Math.round(colliTot2w / 12),
@@ -769,8 +824,18 @@ export function runUnifiedForecastPipeline(
  */
 export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
   const wb = XLSX.read(buffer, { type: 'array' });
-  const firstSheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[firstSheetName];
+  
+  // Cerca preferibilmente il foglio "Distinta Tutti gli Ordini" come indicato nel modello v3
+  let sheetName = wb.SheetNames[0];
+  const targetSheet = wb.SheetNames.find(s => {
+    const clean = s.trim().toLowerCase();
+    return clean.includes('distinta') || clean.includes('tutti') || clean.includes('ordini');
+  });
+  if (targetSheet) {
+    sheetName = targetSheet;
+  }
+
+  const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error('Il file Excel non contiene fogli validi.');
 
   // Leggi come array di righe non elaborate per preservare date e stringhe
@@ -786,7 +851,7 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
     if (!row) continue;
     const hasData = row.some(cell => {
       const s = String(cell || '').toLowerCase();
-      return s.includes('data') || s.includes('colli') || s.includes('reparto') || s.includes('ordine');
+      return s.includes('data') || s.includes('colli') || s.includes('reparto') || s.includes('ordine') || s.includes('descrizione');
     });
     if (hasData) {
       headerRowIdx = i;
@@ -798,9 +863,11 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
 
   // Posizionali di default da modello v3 Python:
   // Colonna B (idx 1) = Data Allestimento
+  // Colonna J (idx 9) = Descrizione Articolo (per filtro Promo COOP)
   // Colonna K (idx 10) = Colli Ordinati
   // Colonna L (idx 11) = Colli Allestimento Effettivi
   let colBIdx = 1;
+  let colJDescIdx = 9;
   let colKIdx = 10;
   let colLIdx = 11;
   let colDeptIdx = -1;
@@ -814,6 +881,15 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
     // Data Allestimento
     if (name.includes('data allestiment') || (name.includes('data') && !name.includes('scadenza') && !name.includes('inseriment'))) {
       colBIdx = idx;
+    }
+    // Descrizione Articolo (Colonna J)
+    if (
+      name.includes('descrizione') ||
+      name.includes('articolo') ||
+      name.includes('prodotto') ||
+      name.includes('referenza')
+    ) {
+      colJDescIdx = idx;
     }
     // Colli Ordinati
     if (name.includes('colli ordinat') || name === 'ordinati' || name.includes('qta ordinat')) {
@@ -869,7 +945,7 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
     // Se non trovato, ispeziona le altre celle della riga per trovare il nome reparto
     if (!dept) {
       for (let c = 0; c < Math.min(row.length, 10); c++) {
-        if (c !== colBIdx && c !== colKIdx && c !== colLIdx) {
+        if (c !== colBIdx && c !== colKIdx && c !== colLIdx && c !== colJDescIdx) {
           const detected = normalizeDept(row[c]);
           if (detected) {
             dept = detected;
@@ -882,6 +958,14 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
     if (!dept) {
       dept = DEPARTMENTS[r % 5];
     }
+
+    // Lettura Descrizione Articolo in Colonna J e rilevamento parola "COOP"
+    const rawDesc = colJDescIdx !== -1 && row[colJDescIdx] !== undefined
+      ? String(row[colJDescIdx]).trim()
+      : (row[9] !== undefined ? String(row[9]).trim() : '');
+
+    // Verifica presenza della parola "COOP" (case-insensitive, es. "COOP", "PROD. COOP", etc.)
+    const isCoop = /\bcoop\b/i.test(rawDesc) || rawDesc.toUpperCase().includes('COOP');
 
     // Parsing numerico robusto
     const rawOrdered = row[colKIdx];
@@ -903,7 +987,10 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
       giornoNum: dow,
       giornoNome: gNome,
       sottoreparto: dept,
+      descrizione: rawDesc,
+      isCoop,
       colliOrdinati: Math.round(ordered),
+      colliEffettiviBase: Math.round(effective),
       colliEffettivi: Math.round(effective),
       taglio: effective < ordered ? 1 : 0,
       categoria: colCatIdx !== -1 ? String(row[colCatIdx] || '') : undefined,
