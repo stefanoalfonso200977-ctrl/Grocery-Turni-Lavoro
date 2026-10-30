@@ -6,10 +6,14 @@ import {
   DEPARTMENTS
 } from './types';
 import {
-  generateSampleHistoricalData,
   runUnifiedForecastPipeline,
   parseUploadedExcel
 } from './utils/engine';
+import {
+  saveLastUploadedFile,
+  loadLastUploadedFile,
+  clearLastUploadedFile
+} from './utils/storage';
 import { exportFullExcelReport } from './utils/excelExporter';
 import { Sidebar } from './components/Sidebar';
 import { KpiCards } from './components/KpiCards';
@@ -19,9 +23,7 @@ import { Tab3PrevisioneColli } from './components/Tab3PrevisioneColli';
 import { Tab4EsplosoDettaglio } from './components/Tab4EsplosoDettaglio';
 import { Tab5SintesiOrizzonti } from './components/Tab5SintesiOrizzonti';
 import {
-  Download,
   Calendar,
-  Sparkles,
   FileSpreadsheet,
   Cpu,
   CheckCircle,
@@ -48,16 +50,23 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Inizializza automaticamente con dataset standard realistico all'avvio
+  // Carica automaticamente l'ultimo file caricato dalla memoria persistente all'avvio
   useEffect(() => {
-    try {
-      const demoData = generateSampleHistoricalData();
-      setRecords(demoData);
-      setFileName('Distinta_Colli_Effettivi_DEMO.xlsx');
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err.message || 'Errore durante il caricamento dei dati iniziali');
-    }
+    let mounted = true;
+    (async () => {
+      try {
+        const stored = await loadLastUploadedFile();
+        if (mounted && stored && stored.records && stored.records.length > 0) {
+          setRecords(stored.records);
+          setFileName(stored.fileName);
+        }
+      } catch (err) {
+        console.warn('Nessun file salvato in memoria o errore lettura:', err);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Calcolo pipeline previsionale reattivo a parametri o dati storici
@@ -80,6 +89,8 @@ export const App: React.FC = () => {
       const extractedRecords = parseUploadedExcel(buffer);
       setRecords(extractedRecords);
       setFileName(file.name);
+      // Salva in memoria persistente (IndexedDB)
+      await saveLastUploadedFile(file.name, extractedRecords);
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || 'Errore nel caricamento del file Excel.');
@@ -88,15 +99,14 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLoadDemoData = () => {
-    setIsLoading(true);
-    setErrorMsg(null);
+  const handleClearFile = async () => {
     try {
-      const demoData = generateSampleHistoricalData();
-      setRecords(demoData);
-      setFileName('Distinta_Colli_Effettivi_DEMO.xlsx');
-    } finally {
-      setIsLoading(false);
+      await clearLastUploadedFile();
+      setRecords([]);
+      setFileName(null);
+      setErrorMsg(null);
+    } catch (err) {
+      console.error('Errore durante la cancellazione del file:', err);
     }
   };
 
@@ -135,7 +145,7 @@ export const App: React.FC = () => {
         params={params}
         onParamsChange={setParams}
         onFileUpload={handleFileUpload}
-        onLoadDemoData={handleLoadDemoData}
+        onClearFile={handleClearFile}
         fileName={fileName}
         recordsCount={records.length}
         isLoading={isLoading}
@@ -184,21 +194,27 @@ export const App: React.FC = () => {
 
           {/* Banner Storico e Range Previsionale */}
           {result && (
-            <div className="mt-3 py-2 px-3 bg-emerald-50/80 border border-emerald-200/90 rounded-lg text-xs flex flex-wrap items-center gap-y-1 gap-x-4 text-emerald-950">
-              <span className="flex items-center gap-1.5 font-medium">
-                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                Storico Rilevato nel File: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{result.rangeStoricoStr}</strong>
-              </span>
-              <span className="text-emerald-300">|</span>
-              <span className="flex items-center gap-1.5 font-medium">
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                Settimana 1: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{result.rangeW1Str}</strong>
-              </span>
-              <span className="text-emerald-300">|</span>
-              <span className="flex items-center gap-1.5 font-medium">
-                <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                Settimana 2: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{result.rangeW2Str}</strong>
-              </span>
+            <div className="mt-3 space-y-2">
+              <div className="py-2 px-3 bg-emerald-50/80 border border-emerald-200/90 rounded-lg text-xs flex flex-wrap items-center gap-y-1 gap-x-4 text-emerald-950">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  Storico Rilevato: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{result.rangeStoricoStr}</strong>
+                </span>
+                <span className="text-emerald-300">|</span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                  Settimana 1: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{result.rangeW1Str}</strong>
+                </span>
+                <span className="text-emerald-300">|</span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                  Settimana 2: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-200">{result.rangeW2Str}</strong>
+                </span>
+                <span className="text-emerald-300">|</span>
+                <span className="text-slate-600 font-medium">
+                  Righe elaborate: <strong className="text-slate-900">{records.length.toLocaleString('it-IT')}</strong>
+                </span>
+              </div>
             </div>
           )}
 
@@ -255,18 +271,14 @@ export const App: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="text-center py-16 bg-white rounded-xl border border-slate-200 p-8 shadow-xs">
-              <Sparkles className="w-10 h-10 text-blue-500 mx-auto mb-3 animate-pulse" />
-              <h3 className="text-base font-bold text-slate-800">Nessun dato caricato</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                Carica un file Excel delle distinte ordini dal menu laterale oppure clicca su &quot;Carica Dati Demo Standard&quot; per generare il calendario bisettimanale dei turni.
+            <div className="text-center py-20 bg-white rounded-xl border border-slate-200 p-8 shadow-xs">
+              <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-4 text-3xl">
+                📂
+              </div>
+              <h3 className="text-base font-bold text-slate-800">Nessun file Excel caricato</h3>
+              <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
+                Carica un file Excel delle distinte ordini (<code>.xlsx</code>) dal riquadro nella barra laterale sinistra per generare automaticamente il calendario delle 2 settimane successive, i turni e il report dei costi.
               </p>
-              <button
-                onClick={handleLoadDemoData}
-                className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
-              >
-                Carica Dati Dimostrativi
-              </button>
             </div>
           )}
         </div>

@@ -38,8 +38,35 @@ export function arrotondaSoglia050(val: number): number {
 }
 
 /**
+ * Parsing robusto di numeri italiani o standard (gestione punto per migliaia e virgola decimale)
+ */
+export function parseItalianNumber(val: unknown): number {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  let s = String(val).trim();
+  if (!s) return 0;
+
+  // Rimozione simboli valuta, spazi, etc.
+  s = s.replace(/[€\s]/g, '');
+
+  // Formato tipo "1.234,50" -> 1234.50
+  if (s.includes('.') && s.includes(',')) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (s.includes(',')) {
+    // Formato tipo "12,5" -> 12.5
+    s = s.replace(',', '.');
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    // Formato tipo "1.250" o "12.500" (migliaia con punto e senza decimali)
+    s = s.replace(/\./g, '');
+  }
+
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+/**
  * Parsing di date sia in formato esteso italiano ("Lunedì 12 Ottobre 2026")
- * sia in formato standard ISO o Excel serial date.
+ * sia in formato standard ISO o seriale Excel.
  */
 export function parseDate(val: unknown): Date | null {
   if (!val) return null;
@@ -49,7 +76,8 @@ export function parseDate(val: unknown): Date | null {
   }
 
   if (typeof val === 'number') {
-    // Excel serial number
+    // Seriale Excel: 1 = 1899-12-31, con bug leap year 1900
+    // XLSX converte o gestisce seriali
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const days = Math.floor(val);
     const ms = Math.round((val - days) * 86400000);
@@ -60,32 +88,35 @@ export function parseDate(val: unknown): Date | null {
   const s = String(val).trim();
   const parts = s.split(/\s+/);
 
-  // Es: "Lunedì 12 Ottobre 2026"
-  if (parts.length >= 4) {
-    const meseKey = parts[2].toLowerCase();
-    if (MESI_MAP[meseKey]) {
-      const giorno = parseInt(parts[1], 10);
-      const mese = MESI_MAP[meseKey];
-      const anno = parseInt(parts[3], 10);
-      const d = new Date(anno, mese - 1, giorno);
-      if (!isNaN(d.getTime())) return d;
+  // Es: "Lunedì 12 Ottobre 2026" oppure "12 Ottobre 2026"
+  if (parts.length >= 3) {
+    for (let i = 0; i < parts.length - 1; i++) {
+      const meseKey = parts[i].toLowerCase();
+      if (MESI_MAP[meseKey] && i > 0) {
+        const giorno = parseInt(parts[i - 1], 10);
+        const mese = MESI_MAP[meseKey];
+        const anno = parseInt(parts[i + 1], 10);
+        if (!isNaN(giorno) && !isNaN(anno) && anno > 2000) {
+          const d = new Date(anno, mese - 1, giorno);
+          if (!isNaN(d.getTime())) return d;
+        }
+      }
     }
   }
 
-  // Fallback DD/MM/YYYY
+  // Fallback DD/MM/YYYY o DD-MM-YYYY
   const dmMatch = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
   if (dmMatch) {
     const d = new Date(parseInt(dmMatch[3], 10), parseInt(dmMatch[2], 10) - 1, parseInt(dmMatch[1], 10));
     if (!isNaN(d.getTime())) return d;
   }
 
-  // Fallback standard Date.parse
+  // Fallback standard Date.parse (es. YYYY-MM-DD)
   const dStandard = new Date(s);
   return isNaN(dStandard.getTime()) ? null : dStandard;
 }
 
 export function formatDataBreve(d: Date): string {
-  // Day of week: 0=Dom in JS, convert to 0=Lun
   const dow = (d.getDay() + 6) % 7;
   const gAbbr = GIORNI_ABBR[dow];
   const dd = String(d.getDate()).padStart(2, '0');
@@ -110,75 +141,85 @@ export function formatDataEstesa(d: Date): string {
   return `${gNome} ${dd} ${mNome} ${yyyy}`;
 }
 
+/**
+ * Normalizza il nome del sottoreparto supportando tutte le varianti
+ * usate nella GDO italiana.
+ */
 export function normalizeDept(raw: unknown): Department | null {
   if (!raw) return null;
   const s = String(raw).trim().toUpperCase();
-  if (s.includes('ALIM')) return 'ALIMENTARI';
-  if (s.includes('CHIM')) return 'CHIMICA';
-  if (s.includes('LIQ') || s.includes('BEV') || s.includes('DRINK')) return 'LIQUIDI';
-  if (s.includes('PET')) return 'PETFOOD';
-  if (s.includes('PROF') || s.includes('COSM') || s.includes('CURA')) return 'PROFUMERIA';
+
+  // ALIMENTARI
+  if (
+    s.includes('ALIM') ||
+    s.includes('DROGHERIA') ||
+    s.includes('SECCO') ||
+    s.includes('GROCERY') ||
+    s.includes('FRESCH') ||
+    s.includes('SURGELAT') ||
+    s.includes('FOOD') && !s.includes('PET')
+  ) {
+    return 'ALIMENTARI';
+  }
+
+  // CHIMICA
+  if (
+    s.includes('CHIM') ||
+    s.includes('DETERG') ||
+    s.includes('PULIZIA') ||
+    s.includes('CASA') ||
+    s.includes('DETERSIV')
+  ) {
+    return 'CHIMICA';
+  }
+
+  // LIQUIDI
+  if (
+    s.includes('LIQ') ||
+    s.includes('BEV') ||
+    s.includes('DRINK') ||
+    s.includes('ACQU') ||
+    s.includes('BIRR') ||
+    s.includes('VIN') ||
+    s.includes('BIBIT')
+  ) {
+    return 'LIQUIDI';
+  }
+
+  // PETFOOD
+  if (
+    s.includes('PET') ||
+    s.includes('ANIMAL') ||
+    s.includes('CANE') ||
+    s.includes('GATT')
+  ) {
+    return 'PETFOOD';
+  }
+
+  // PROFUMERIA
+  if (
+    s.includes('PROFUM') ||
+    s.includes('COSM') ||
+    s.includes('CURA') ||
+    s.includes('IGIEN') ||
+    s.includes('BELLEZZA') ||
+    s.includes('PERSONAL')
+  ) {
+    return 'PROFUMERIA';
+  }
+
   return null;
 }
 
-/**
- * Genera dati storici dimostrativi realistici (3 mesi di storico ordini grocery)
- * con pattern settimanali, festività e variazioni di volume.
- */
-export function generateSampleHistoricalData(): HistoricalRecord[] {
-  const records: HistoricalRecord[] = [];
-  const baseDate = new Date(2026, 9, 1); // 1 Ottobre 2026
 
-  // 4 settimane di storico fino a fine Ottobre
-  const numDays = 28;
-  const baseVol: Record<Department, number> = {
-    ALIMENTARI: 480,
-    CHIMICA: 180,
-    LIQUIDI: 350,
-    PETFOOD: 120,
-    PROFUMERIA: 90
-  };
-
-  // Moltiplicatori per giorno della settimana (0 = Lun, ..., 6 = Dom)
-  const dayWeights = [1.25, 0.95, 0.90, 1.15, 1.30, 0.70, 0.0];
-
-  for (let i = 0; i < numDays; i++) {
-    const curDate = new Date(baseDate.getTime() + i * 86400000);
-    const dow = (curDate.getDay() + 6) % 7;
-    const gNome = GIORNI_ITA[dow];
-    const dataIso = curDate.toISOString().split('T')[0];
-
-    if (dow === 6) continue; // Domenica magazzino chiuso
-
-    for (const dept of DEPARTMENTS) {
-      const noise = 0.9 + Math.random() * 0.2;
-      const ordered = Math.round(baseVol[dept] * dayWeights[dow] * noise);
-      // simulazione tagli (rotture / colli effettivi colonna L)
-      const cutProb = Math.random() < 0.18 ? 0.04 + Math.random() * 0.08 : 0.0;
-      const effective = Math.round(ordered * (1 - cutProb));
-
-      records.push({
-        data: dataIso,
-        giornoNum: dow,
-        giornoNome: gNome,
-        sottoreparto: dept,
-        colliOrdinati: ordered,
-        colliEffettivi: effective,
-        taglio: effective < ordered ? 1 : 0,
-        categoria: `CAT_${dept.substring(0, 3)}`,
-        tipoCarico: 'STANDARD',
-        piattaforma: 'HUB_CENTRALE',
-        destinazione: 'STORE_RETE'
-      });
-    }
-  }
-
-  return records;
-}
 
 /**
- * Analizza e calcola la pipeline previsionale bisettimanale completa (14 giorni)
- * preservando fedelmente le formule del modello Gradient Boosting v3 e di app.py.
+ * Pipeline Previsionale Bisettimanale Completa:
+ * 1. Raggruppa prima per (Data, Sottoreparto) calcolando la SOMMA GIORNALIERA dei colli
+ *    (proprio come `df.groupby(['Data', 'Sottoreparto'])['Colli_Effettivi_L'].sum()` nel modello Python!).
+ * 2. Riconosce min e max date storiche e calcola l'inizio del piano bisettimanale.
+ * 3. Addestra le stime temporali (dayAvg, lag1, lag7, roll3).
+ * 4. Calcola turni, addetti soglia 0.50, jolly mobilità interna e costi lavoro.
  */
 export function runUnifiedForecastPipeline(
   records: HistoricalRecord[],
@@ -188,18 +229,57 @@ export function runUnifiedForecastPipeline(
     throw new Error('Nessun record valido trovato per la pianificazione.');
   }
 
-  // 1. Rileva min e max date storiche
-  const dates = records
-    .map(r => parseDate(r.data))
-    .filter((d): d is Date => d !== null);
+  // 1. RAGGRUPPAMENTO GIORNALIERO: somma tutti i colli delle singole righe d'ordine per (Data, Sottoreparto)
+  // Questo passaggio è fondamentale: ogni riga dell'Excel è una riga d'ordine (1-10 colli),
+  // e la produzione/fabbisogno turni si basa sulla somma totale dei colli del giorno!
+  const dailyMap: Record<string, {
+    dataIso: string;
+    dateObj: Date;
+    giornoNum: number;
+    giornoNome: string;
+    depts: Record<Department, number>;
+  }> = {};
 
-  const minTime = Math.min(...dates.map(d => d.getTime()));
-  const maxTime = Math.max(...dates.map(d => d.getTime()));
-  const dataMinStorico = new Date(minTime);
-  const dataMaxStorico = new Date(maxTime);
+  records.forEach(r => {
+    const d = parseDate(r.data);
+    if (!d) return;
 
-  // 2. Calcolo automatico della data di inizio piano bisettimanale:
-  // Parte dal Lunedì immediatamente successivo alla data massima presente nel file
+    const dataIso = d.toISOString().split('T')[0];
+    const dow = (d.getDay() + 6) % 7;
+    const gNome = GIORNI_ITA[dow];
+
+    if (!dailyMap[dataIso]) {
+      dailyMap[dataIso] = {
+        dataIso,
+        dateObj: d,
+        giornoNum: dow,
+        giornoNome: gNome,
+        depts: {
+          ALIMENTARI: 0,
+          CHIMICA: 0,
+          LIQUIDI: 0,
+          PETFOOD: 0,
+          PROFUMERIA: 0
+        }
+      };
+    }
+
+    if (r.sottoreparto && dailyMap[dataIso].depts[r.sottoreparto] !== undefined) {
+      dailyMap[dataIso].depts[r.sottoreparto] += r.colliEffettivi;
+    }
+  });
+
+  const dailyList = Object.values(dailyMap).sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+  if (dailyList.length === 0) {
+    throw new Error('Nessuna data valida trovata nelle righe del file Excel.');
+  }
+
+  // 2. Rileva min e max date storiche
+  const dataMinStorico = dailyList[0].dateObj;
+  const dataMaxStorico = dailyList[dailyList.length - 1].dateObj;
+
+  // Calcolo data di inizio piano bisettimanale: Lunedì immediatamente successivo alla data massima
   const maxDow = (dataMaxStorico.getDay() + 6) % 7; // 0=Lun, 6=Dom
   let giorniAlProssimoLunedi = (7 - maxDow) % 7;
   if (giorniAlProssimoLunedi === 0) {
@@ -208,7 +288,7 @@ export function runUnifiedForecastPipeline(
   const dataInizioPiano = new Date(dataMaxStorico.getTime() + giorniAlProssimoLunedi * 86400000);
   dataInizioPiano.setHours(0, 0, 0, 0);
 
-  // Costruzione calendario 14 giorni (2 settimane consecutive)
+  // Calendario 14 giorni (2 settimane consecutive)
   const calendario14: Date[] = [];
   for (let i = 0; i < 14; i++) {
     calendario14.push(new Date(dataInizioPiano.getTime() + i * 86400000));
@@ -224,8 +304,10 @@ export function runUnifiedForecastPipeline(
   const rangeW2Str = `${formatDataStr(inizioW2)} - ${formatDataStr(fineW2)}`;
   const range2WStr = `${formatDataStr(inizioW1)} - ${formatDataStr(fineW2)}`;
 
-  // 3. Calcolo pattern medi per sottoreparto e giorno della settimana dallo storico
-  const deptDayTotals: Record<string, { sumColli: number; count: number }> = {};
+  // 3. Calcolo medie giornaliere storiche per giorno della settimana (Lun..Sab) e stime temporali per reparto
+  const deptDayAvg: Record<Department, Record<number, { sum: number; count: number }>> = {
+    ALIMENTARI: {}, CHIMICA: {}, LIQUIDI: {}, PETFOOD: {}, PROFUMERIA: {}
+  };
   const deptOverall: Record<Department, { sumColli: number; count: number; lag1: number; lag7: number; roll3: number }> = {
     ALIMENTARI: { sumColli: 0, count: 0, lag1: 450, lag7: 460, roll3: 455 },
     CHIMICA: { sumColli: 0, count: 0, lag1: 170, lag7: 175, roll3: 172 },
@@ -234,25 +316,46 @@ export function runUnifiedForecastPipeline(
     PROFUMERIA: { sumColli: 0, count: 0, lag1: 85, lag7: 90, roll3: 88 }
   };
 
-  records.forEach(r => {
-    const key = `${r.sottoreparto}_${r.giornoNum}`;
-    if (!deptDayTotals[key]) {
-      deptDayTotals[key] = { sumColli: 0, count: 0 };
+  // Inizializza giorno-settimana per ogni dept
+  DEPARTMENTS.forEach(dept => {
+    for (let dow = 0; dow < 7; dow++) {
+      deptDayAvg[dept][dow] = { sum: 0, count: 0 };
     }
-    deptDayTotals[key].sumColli += r.colliEffettivi;
-    deptDayTotals[key].count += 1;
-
-    deptOverall[r.sottoreparto].sumColli += r.colliEffettivi;
-    deptOverall[r.sottoreparto].count += 1;
   });
 
-  // Aggiorna stime di lag e medie
+  // Aggrega sulle giornate storiche effettive
+  dailyList.forEach(day => {
+    if (day.giornoNum === 6) return; // ignora domeniche per le medie dei giorni feriali
+    DEPARTMENTS.forEach(dept => {
+      const colli = day.depts[dept] || 0;
+      if (colli > 0) {
+        deptDayAvg[dept][day.giornoNum].sum += colli;
+        deptDayAvg[dept][day.giornoNum].count += 1;
+
+        deptOverall[dept].sumColli += colli;
+        deptOverall[dept].count += 1;
+      }
+    });
+  });
+
+  // Calcola Lag 1, Lag 7, Rolling 3 sulle ultime giornate storiche per ciascun reparto
   DEPARTMENTS.forEach(dept => {
-    if (deptOverall[dept].count > 0) {
-      const avg = deptOverall[dept].sumColli / deptOverall[dept].count;
-      deptOverall[dept].lag1 = avg;
-      deptOverall[dept].lag7 = avg;
-      deptOverall[dept].roll3 = avg;
+    const deptDailyHistory = dailyList
+      .filter(d => d.giornoNum < 6 && d.depts[dept] > 0)
+      .map(d => d.depts[dept]);
+
+    const len = deptDailyHistory.length;
+    const overallMean = deptOverall[dept].count > 0
+      ? deptOverall[dept].sumColli / deptOverall[dept].count
+      : 400;
+
+    deptOverall[dept].lag1 = len > 0 ? deptDailyHistory[len - 1] : overallMean;
+    deptOverall[dept].lag7 = len >= 7 ? deptDailyHistory[len - 7] : overallMean;
+
+    if (len >= 3) {
+      deptOverall[dept].roll3 = (deptDailyHistory[len - 1] + deptDailyHistory[len - 2] + deptDailyHistory[len - 3]) / 3;
+    } else {
+      deptOverall[dept].roll3 = overallMean;
     }
   });
 
@@ -290,27 +393,25 @@ export function runUnifiedForecastPipeline(
         // Domenica chiuso / nessun allestimento
         colliPred = 0.0;
       } else {
-        const key = `${dept}_${gNum}`;
-        const dayAvg = deptDayTotals[key] && deptDayTotals[key].count > 0
-          ? deptDayTotals[key].sumColli / deptDayTotals[key].count
-          : deptOverall[dept].lag1;
+        const stats = deptDayAvg[dept][gNum];
+        const overallMean = deptOverall[dept].count > 0 ? deptOverall[dept].sumColli / deptOverall[dept].count : 300;
+        const dayAvg = stats.count > 0 ? stats.sum / stats.count : overallMean;
 
         if (wIdx === 1) {
-          // Stadio 2 model feature blend
+          // Stadio 2: blending modello storico
           const lag1 = deptOverall[dept].lag1;
-          const lag7 = deptOverall[dept].lag7;
           const roll3 = deptOverall[dept].roll3;
-          colliPred = Math.max(0, 0.7 * dayAvg + 0.15 * lag1 + 0.15 * roll3);
+          colliPred = Math.max(0, 0.70 * dayAvg + 0.15 * lag1 + 0.15 * roll3);
           storiaPrevisioniW1[dept][gNum] = colliPred;
           ultimiColliAttivi[dept].push(colliPred);
         } else {
-          // Settimana 2: blending con storia settimana 1
+          // Settimana 2: proiezione bisettimanale autoregressiva
           const prevW1 = storiaPrevisioniW1[dept][gNum] || dayAvg;
           const uLen = ultimiColliAttivi[dept].length;
           const lastActive = ultimiColliAttivi[dept][uLen - 1];
           const last3Mean = (ultimiColliAttivi[dept][uLen - 1] + ultimiColliAttivi[dept][uLen - 2] + ultimiColliAttivi[dept][uLen - 3]) / 3;
 
-          colliPred = Math.max(0, 0.6 * prevW1 + 0.25 * lastActive + 0.15 * last3Mean);
+          colliPred = Math.max(0, 0.60 * prevW1 + 0.25 * lastActive + 0.15 * last3Mean);
           ultimiColliAttivi[dept].push(colliPred);
         }
       }
@@ -672,14 +773,33 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
   const ws = wb.Sheets[firstSheetName];
   if (!ws) throw new Error('Il file Excel non contiene fogli validi.');
 
-  // Leggi come array di righe
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
+  // Leggi come array di righe non elaborate per preservare date e stringhe
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false });
   if (rows.length < 2) {
     throw new Error('Il file Excel non contiene abbastanza dati.');
   }
 
-  const headerRow = rows[0] as string[];
-  // Rilevamento per indice o nome colonna
+  // Rileva la riga di intestazione (tra le prime 5 righe)
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const row = rows[i] as unknown[];
+    if (!row) continue;
+    const hasData = row.some(cell => {
+      const s = String(cell || '').toLowerCase();
+      return s.includes('data') || s.includes('colli') || s.includes('reparto') || s.includes('ordine');
+    });
+    if (hasData) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+
+  const headerRow = (rows[headerRowIdx] || []) as string[];
+
+  // Posizionali di default da modello v3 Python:
+  // Colonna B (idx 1) = Data Allestimento
+  // Colonna K (idx 10) = Colli Ordinati
+  // Colonna L (idx 11) = Colli Allestimento Effettivi
   let colBIdx = 1;
   let colKIdx = 10;
   let colLIdx = 11;
@@ -689,18 +809,45 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
 
   headerRow.forEach((colName, idx) => {
     if (!colName) return;
-    const name = String(colName).toLowerCase();
-    if (name.includes('data')) colBIdx = idx;
-    if (name.includes('ordinat') || name.includes('colli ord')) colKIdx = idx;
-    if (name.includes('effettiv') || name.includes('allestit') || name.includes('colli all')) colLIdx = idx;
-    if (name.includes('sottoreparto') || name.includes('reparto')) colDeptIdx = idx;
-    if (name.includes('categoria')) colCatIdx = idx;
-    if (name.includes('destinazione')) colDestIdx = idx;
+    const name = String(colName).trim().toLowerCase();
+
+    // Data Allestimento
+    if (name.includes('data allestiment') || (name.includes('data') && !name.includes('scadenza') && !name.includes('inseriment'))) {
+      colBIdx = idx;
+    }
+    // Colli Ordinati
+    if (name.includes('colli ordinat') || name === 'ordinati' || name.includes('qta ordinat')) {
+      colKIdx = idx;
+    }
+    // Colli Allestimento Effettivi (Target primario)
+    if (
+      name.includes('colli allestimento effettiv') ||
+      name.includes('colli effettiv') ||
+      name.includes('colli allestit') ||
+      name.includes('colli allestiti') ||
+      name.includes('qta effettiv') ||
+      name.includes('colonna l') ||
+      name === 'colli l'
+    ) {
+      colLIdx = idx;
+    }
+    // Sottoreparto
+    if (name.includes('sottoreparto') || name.includes('reparto') || name.includes('dept')) {
+      colDeptIdx = idx;
+    }
+    // Categoria
+    if (name.includes('codice categoria') || name.includes('categoria')) {
+      colCatIdx = idx;
+    }
+    // Destinazione
+    if (name.includes('destinazione')) {
+      colDestIdx = idx;
+    }
   });
 
   const records: HistoricalRecord[] = [];
 
-  for (let r = 1; r < rows.length; r++) {
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.length === 0) continue;
 
@@ -708,16 +855,45 @@ export function parseUploadedExcel(buffer: ArrayBuffer): HistoricalRecord[] {
     const parsedDate = parseDate(rawDate);
     if (!parsedDate) continue;
 
+    // Filtra righe escluse se colonna Destinazione presente
     const rawDest = colDestIdx !== -1 ? String(row[colDestIdx] || '') : '';
     if (rawDest.includes("Eliminata dall'Ordine") || rawDest.includes('(Esclusa)')) {
       continue;
     }
 
-    const rawDept = colDeptIdx !== -1 ? row[colDeptIdx] : (row[4] || row[3]);
-    const dept = normalizeDept(rawDept) || (DEPARTMENTS[r % 5] as Department);
+    // Risoluzione Sottoreparto
+    let dept: Department | null = null;
+    if (colDeptIdx !== -1 && row[colDeptIdx]) {
+      dept = normalizeDept(row[colDeptIdx]);
+    }
+    // Se non trovato, ispeziona le altre celle della riga per trovare il nome reparto
+    if (!dept) {
+      for (let c = 0; c < Math.min(row.length, 10); c++) {
+        if (c !== colBIdx && c !== colKIdx && c !== colLIdx) {
+          const detected = normalizeDept(row[c]);
+          if (detected) {
+            dept = detected;
+            break;
+          }
+        }
+      }
+    }
+    // Fallback ciclico solo se del tutto assente
+    if (!dept) {
+      dept = DEPARTMENTS[r % 5];
+    }
 
-    const ordered = parseFloat(String(row[colKIdx] || '0')) || 0;
-    const effective = parseFloat(String(row[colLIdx] || '0')) || ordered;
+    // Parsing numerico robusto
+    const rawOrdered = row[colKIdx];
+    const rawEffective = row[colLIdx];
+
+    const ordered = parseItalianNumber(rawOrdered);
+    let effective = parseItalianNumber(rawEffective);
+
+    // Se la colonna effettiva è vuota ma ci sono colli ordinati, usa gli ordinati
+    if (effective === 0 && ordered > 0 && (rawEffective === undefined || rawEffective === '' || rawEffective === null)) {
+      effective = ordered;
+    }
 
     const dow = (parsedDate.getDay() + 6) % 7;
     const gNome = GIORNI_ITA[dow];

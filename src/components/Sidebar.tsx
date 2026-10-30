@@ -6,17 +6,16 @@ import {
   Clock,
   Package,
   Upload,
-  RefreshCw,
-  FileSpreadsheet,
   CheckCircle2,
-  Sparkles
+  Trash2,
+  HardDrive
 } from 'lucide-react';
 
 interface SidebarProps {
   params: OperationalParams;
   onParamsChange: (newParams: OperationalParams) => void;
   onFileUpload: (file: File) => void;
-  onLoadDemoData: () => void;
+  onClearFile?: () => void;
   fileName: string | null;
   recordsCount: number;
   isLoading: boolean;
@@ -26,7 +25,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   params,
   onParamsChange,
   onFileUpload,
-  onLoadDemoData,
+  onClearFile,
   fileName,
   recordsCount,
   isLoading
@@ -99,25 +98,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {fileName ? (
-            <div className="mt-2.5 p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-xs text-emerald-800">
-              <div className="flex items-center gap-1.5 truncate">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span className="truncate font-medium">{fileName}</span>
+            <div className="mt-2.5 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg space-y-1.5 text-xs text-emerald-900">
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5 truncate">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="truncate font-semibold">{fileName}</span>
+                </div>
+                {onClearFile && (
+                  <button
+                    onClick={onClearFile}
+                    title="Rimuovi file dalla memoria"
+                    className="p-1 hover:bg-emerald-100 rounded text-emerald-700 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
-              <span className="text-[11px] font-semibold text-emerald-700 shrink-0 ml-1">
-                {recordsCount} righe
-              </span>
+              <div className="flex items-center justify-between text-[11px] text-emerald-700">
+                <span className="flex items-center gap-1 font-medium">
+                  <HardDrive className="w-3 h-3 text-emerald-600" />
+                  In memoria persistente
+                </span>
+                <span className="font-bold">{recordsCount.toLocaleString('it-IT')} righe</span>
+              </div>
             </div>
           ) : null}
-
-          <button
-            onClick={onLoadDemoData}
-            disabled={isLoading}
-            className="w-full mt-2.5 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg transition border border-slate-200"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            Carica Dati Demo Standard
-          </button>
         </div>
 
         {/* Parametri Operativi */}
