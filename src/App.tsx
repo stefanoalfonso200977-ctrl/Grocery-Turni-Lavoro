@@ -118,7 +118,7 @@ export const App: React.FC = () => {
 
   const handleDownloadExcel = () => {
     if (!result) return;
-    exportFullExcelReport(result);
+    exportFullExcelReport(result, params, fileName || undefined);
   };
 
   const handleExportMLJson = () => {

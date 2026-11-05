@@ -79,7 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 min-h-screen text-slate-800">
+    <aside className="w-84 xl:w-88 bg-white border-r border-slate-200 flex flex-col shrink-0 min-h-screen text-slate-800">
       {/* Intestazione Sidebar */}
       <div className="p-4 border-b border-slate-200 bg-slate-50/60">
         <div className="flex items-center gap-2">
@@ -149,13 +149,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* SIMULATORE WHAT-IF: PROMO COOP & STAGIONALITÀ */}
         <div className="p-3 bg-gradient-to-br from-amber-500/10 via-orange-500/10 to-amber-500/5 rounded-xl border border-amber-300/80 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-950">
-              <TrendingUp className="w-4 h-4 text-amber-600" />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-950 whitespace-nowrap shrink-0">
+              <TrendingUp className="w-4 h-4 text-amber-600 shrink-0" />
               <span>Simulatore What-If</span>
             </div>
-            <span className="text-[10px] font-semibold bg-amber-200/90 text-amber-950 px-2 py-0.5 rounded-full border border-amber-300">
-              Promo & Stagioni
+            <span className="text-[10px] font-semibold bg-amber-200/90 text-amber-950 px-2 py-0.5 rounded-full border border-amber-300 whitespace-nowrap shrink-0">
+              Promo &amp; Stagioni
             </span>
           </div>
 
